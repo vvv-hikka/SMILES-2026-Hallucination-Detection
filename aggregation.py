@@ -19,10 +19,15 @@ from __future__ import annotations
 
 import torch
 
+LAYER_SET_NO_GEOMETRIC = [0, 8, 18, 7, 11, 10, 19, 20]
+LAYER_SET_WITH_GEOMETRIC = [6, 12]
+
 
 def aggregate(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
+    layer_indices: list[int] | None = None,
+    response_start_idx: int | None = None,
 ) -> torch.Tensor:
     """Convert per-token hidden states into a single feature vector.
 
@@ -41,21 +46,26 @@ def aggregate(
         Replace or extend the skeleton below with alternative layer selection,
         token pooling (mean, max, weighted), or multi-layer fusion strategies.
     """
-    # ------------------------------------------------------------------
-    # STUDENT: Replace or extend the aggregation below.
-    # ------------------------------------------------------------------
 
-    # Default: last real token of the final transformer layer.
-    layer = hidden_states[-1]          # (seq_len, hidden_dim)
+    if layer_indices is None:
+        layer_indices = LAYER_SET_NO_GEOMETRIC
 
-    # Find the index of the last real (non-padding) token.
-    real_positions = attention_mask.nonzero(as_tuple=False)  # (n_real, 1)
-    last_pos = int(real_positions[-1].item())                 # scalar index
+    real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
+    if real_positions.numel() == 0:
+        return torch.zeros(len(layer_indices) * hidden_states.shape[-1], dtype=hidden_states.dtype, device=hidden_states.device)
 
-    feature = layer[last_pos]          # (hidden_dim,)
+    if response_start_idx is not None:
+        response_positions = real_positions[real_positions >= int(response_start_idx)]
+        token_positions = response_positions if response_positions.numel() > 0 else real_positions
+    else:
+        token_positions = real_positions
 
-    return feature
-    # ------------------------------------------------------------------
+    pooled_layers = []
+    for layer_idx in layer_indices:
+        layer = hidden_states[layer_idx]
+        pooled_layers.append(layer[token_positions].mean(dim=0))
+
+    return torch.cat(pooled_layers, dim=0)
 
 
 def extract_geometric_features(
@@ -81,18 +91,37 @@ def extract_geometric_features(
         norms, inter-layer cosine similarity (representation drift), or
         sequence length.
     """
-    # ------------------------------------------------------------------
-    # STUDENT: Replace or extend the geometric feature extraction below.
-    # ------------------------------------------------------------------
+    layer_indices = LAYER_SET_WITH_GEOMETRIC
 
-    # Placeholder: returns an empty tensor (no geometric features).
-    return torch.zeros(0)
+    real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
+    if real_positions.numel() == 0:
+        return torch.zeros(4, dtype=hidden_states.dtype, device=hidden_states.device)
+
+    layer_means = []
+    for layer_idx in layer_indices:
+        layer = hidden_states[layer_idx]  # (seq_len, hidden_dim)
+        layer_means.append(layer[real_positions].mean(dim=0))
+
+    stacked = torch.stack(layer_means, dim=0)  # (n_layers, hidden_dim)
+    norms = torch.norm(stacked, dim=1)  # (n_layers,)
+    drift = torch.norm(stacked[1:] - stacked[:-1], dim=1) if stacked.size(0) > 1 else torch.zeros(1, dtype=hidden_states.dtype, device=hidden_states.device)
+    n_tokens = torch.tensor(float(real_positions.numel()), dtype=hidden_states.dtype, device=hidden_states.device)
+
+    return torch.stack(
+        [
+            norms.mean(),
+            norms.std(unbiased=False),
+            drift.mean(),
+            torch.log1p(n_tokens),
+        ]
+    )
 
 
 def aggregation_and_feature_extraction(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
     use_geometric: bool = False,
+    response_start_idx: int | None = None,
 ) -> torch.Tensor:
     """Aggregate hidden states and optionally append geometric features.
 
@@ -113,7 +142,13 @@ def aggregation_and_feature_extraction(
         ``feature_dim = hidden_dim`` (or larger for multi-layer or geometric
         concatenations).
     """
-    agg_features = aggregate(hidden_states, attention_mask)  # (feature_dim,)
+    layer_indices = LAYER_SET_WITH_GEOMETRIC if use_geometric else LAYER_SET_NO_GEOMETRIC
+    agg_features = aggregate(
+        hidden_states,
+        attention_mask,
+        layer_indices=layer_indices,
+        response_start_idx=response_start_idx,
+    )
 
     if use_geometric:
         geo_features = extract_geometric_features(hidden_states, attention_mask)
