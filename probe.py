@@ -26,12 +26,13 @@ class HallucinationProbe(nn.Module):
     built lazily in ``fit()`` once the feature dimension is known.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, pca_components: int = 256) -> None:
         super().__init__()
         self._net: nn.Sequential | None = None  # built lazily in fit()
         self._scaler = StandardScaler()
         self._pca: PCA | None = None
         self._threshold: float = 0.5  # tuned by fit_hyperparameters()
+        self._pca_components = max(1, int(pca_components))
 
     def _build_network(self, input_dim: int) -> None:
         """Instantiate the network layers.
@@ -75,7 +76,11 @@ class HallucinationProbe(nn.Module):
             ``self`` (for method chaining).
         """
         X_scaled = self._scaler.fit_transform(X)
-        n_components = min(256, X_scaled.shape[1], max(16, X_scaled.shape[0] - 1))
+        n_components = min(
+            self._pca_components,
+            X_scaled.shape[1],
+            max(16, X_scaled.shape[0] - 1),
+        )
         self._pca = PCA(n_components=n_components, svd_solver="auto", random_state=42)
         X_proj = self._pca.fit_transform(X_scaled)
 
