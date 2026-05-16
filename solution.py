@@ -56,7 +56,7 @@ from splitting import split_data
 DATA_FILE     = "./data/dataset.csv"   # path to the dataset CSV
 OUTPUT_FILE   = "results.json"         # where to write the results summary
 BATCH_SIZE    = 8
-USE_GEOMETRIC = False                  # set True to enable geometric feature extraction
+USE_GEOMETRIC = True                   # set True to enable geometric feature extraction
 TEST_FILE        = "./data/test.csv"   # competition test set (labels are null)
 PREDICTIONS_FILE = "predictions.csv"   # output file with predicted labels
 
@@ -81,7 +81,6 @@ def _response_start_indices(
 
     Index refers to token position in tokenized ``prompt + response`` and is
     clamped to ``[0, max_length - 1]``.
-    Uses the same tokenization settings as feature extraction for consistency.
     """
     starts: list[int] = []
     for prompt, response in zip(prompts, responses):

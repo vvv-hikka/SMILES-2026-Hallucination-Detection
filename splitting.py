@@ -52,7 +52,7 @@ def split_data(
     """
 
     idx = np.arange(len(y))
-    n_splits = 3
+    n_splits = 2
     n_repeats = 2
     rskf = RepeatedStratifiedKFold(
         n_splits=n_splits,
@@ -60,7 +60,8 @@ def split_data(
         random_state=random_state,
     )
 
-    relative_val = val_size / max(1.0 - test_size, 1e-6)
+    effective_val_size = min(val_size, 0.10)
+    relative_val = effective_val_size / max(1.0 - test_size, 1e-6)
     splits: list[tuple[np.ndarray, np.ndarray | None, np.ndarray]] = []
 
     for rep_idx, (idx_train_val, idx_test) in enumerate(rskf.split(idx, y)):
