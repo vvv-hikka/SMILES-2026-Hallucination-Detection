@@ -5,12 +5,11 @@ Tried:
 - Model: linear / MLP / MLP+dropout / SVM / kNN probes,
 - Split: single split vs stratified k-fold.
 
-Final choice (minimal, stable):
-- `splitting.py`: stratified 5-fold split for more reliable validation.
-- `probe.py`: keep MLP but add dropout + AdamW + slightly longer training.
-- `aggregation.py`: response-mean pooling with fixed selected layers
+## Experiments intentionally skipped in this baseline
 
-Why:
-- multi-layer features helped some models but were unstable across splits,
-- k-fold gave more trustworthy model selection than a single split,
-- regularized MLP was the best accuracy/stability trade-off under minimal code changes.
+- Multi-layer concatenation:
+  - Better expressiveness but higher feature dimension and slower probe training.
+- 5-fold cross-validation:
+  - Better stability estimates but too expensive for quick Colab iteration.
+- Deeper MLP probes:
+  - Can improve performance, but increases tuning burden and runtime.
