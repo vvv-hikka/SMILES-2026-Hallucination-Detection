@@ -156,8 +156,6 @@ def aggregation_and_feature_extraction(
     agg_features = aggregate(
         hidden_states,
         attention_mask,
-        layer_indices=LAYER_SET,
-        response_start_idx=response_start_idx,
     )
 
     if use_geometric:
