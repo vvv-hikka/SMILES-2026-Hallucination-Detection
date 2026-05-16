@@ -26,6 +26,7 @@ LAYER_SET = [0, 8, 18, 7]
 def aggregate(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
+    layer_indices: list[int] | None = None,
 ) -> torch.Tensor:
     """Convert per-token hidden states into a single feature vector.
 
@@ -135,7 +136,6 @@ def aggregation_and_feature_extraction(
         ``feature_dim = hidden_dim`` (or larger for multi-layer or geometric
         concatenations).
     """
-    layer_indices = LAYER_SET
     agg_features = aggregate(
         hidden_states,
         attention_mask,
