@@ -26,7 +26,7 @@ class HallucinationProbe(nn.Module):
     built lazily in ``fit()`` once the feature dimension is known.
     """
 
-    def __init__(self, pca_components: int = 256) -> None:
+    def __init__(self, pca_components: int = 192) -> None:
         super().__init__()
         self._net: nn.Sequential | None = None  # built lazily in fit()
         self._scaler = StandardScaler()

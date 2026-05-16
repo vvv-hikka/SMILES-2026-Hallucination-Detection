@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import torch
 
-LAYER_SET = [12, 18]
+LAYER_SET = [8, 18, 20]
 # LAYER_SET_WITH_GEOMETRIC = [6, 12]
 
 
