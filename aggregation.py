@@ -26,6 +26,7 @@ LAYER_SET = [0, 8, 18, 7]
 def aggregate(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
+    response_start_idx: int | None = None,
 ) -> torch.Tensor:
     """Convert per-token hidden states into a single feature vector.
 
@@ -82,6 +83,7 @@ def aggregate(
 def extract_geometric_features(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
+    response_start_idx: int | None = None,
 ) -> torch.Tensor:
     """Extract hand-crafted geometric / statistical features from hidden states.
 
@@ -156,6 +158,7 @@ def aggregation_and_feature_extraction(
     agg_features = aggregate(
         hidden_states,
         attention_mask,
+        response_start_idx,
     )
 
     if use_geometric:
