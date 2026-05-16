@@ -1,17 +1,16 @@
-"""experiments.py — Grid search for layer sets and PCA dimensions.
+"""experiments.py — Grid search for layer sets and probe hyperparameters.
 
 Runs a controlled ablation using the same split protocol for every config and
 reports:
+  - mean test accuracy (primary rank)
+  - std test accuracy across folds (stability)
   - mean test AUROC
-  - std test AUROC across folds
-  - mean train AUROC
   - train-test AUROC gap (overfitting signal)
 """
 
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
 import time
 from typing import Sequence
@@ -30,6 +29,11 @@ from splitting import split_data
 DATA_FILE = "./data/dataset.csv"
 BATCH_SIZE = 8
 USE_GEOMETRIC = False
+TOKENIZER_BOUNDARY_KWARGS = {
+    "add_special_tokens": True,
+    "truncation": True,
+    "max_length": MAX_LENGTH,
+}
 
 
 def _device() -> torch.device:
@@ -53,18 +57,8 @@ def _response_start_indices(
     starts: list[int] = []
     for prompt, response in zip(prompts, responses):
         full_text = f"{prompt}{response}"
-        prompt_tokens = tokenizer(
-            prompt,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
-        )["input_ids"]
-        full_tokens = tokenizer(
-            full_text,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
-        )["input_ids"]
+        prompt_tokens = tokenizer(prompt, **TOKENIZER_BOUNDARY_KWARGS)["input_ids"]
+        full_tokens = tokenizer(full_text, **TOKENIZER_BOUNDARY_KWARGS)["input_ids"]
         start_idx = min(len(prompt_tokens), max(len(full_tokens) - 1, 0))
         starts.append(start_idx)
     return starts
@@ -134,13 +128,20 @@ def main() -> None:
         "--pca-dims",
         nargs="+",
         type=int,
-        default=[64, 96, 128, 192],
+        default=[64, 96, 128],
+    )
+    parser.add_argument(
+        "--logreg-cs",
+        nargs="+",
+        type=float,
+        default=[0.01, 0.03, 0.1],
     )
     parser.add_argument("--output-file", default="experiment_results.json")
     args = parser.parse_args()
 
     layer_sets = [_parse_layer_set(s) for s in args.layer_sets]
     pca_dims = [int(x) for x in args.pca_dims]
+    logreg_cs = [float(x) for x in args.logreg_cs]
 
     dev = _device()
     print(f"Device: {dev}")
@@ -178,47 +179,61 @@ def main() -> None:
         print(f"Feature matrix: {X.shape}")
 
         for pca_dim in pca_dims:
-            print(f"  -> PCA dim {pca_dim}")
+            for logreg_c in logreg_cs:
+                print(f"  -> PCA dim {pca_dim}, C {logreg_c}")
 
-            class ProbeWithConfig(HallucinationProbe):
-                def __init__(self) -> None:
-                    super().__init__(pca_components=pca_dim)
+                class ProbeWithConfig(HallucinationProbe):
+                    def __init__(self) -> None:
+                        super().__init__(pca_components=pca_dim, logreg_c=logreg_c)
 
-            fold_results = run_evaluation(splits, X, y, ProbeWithConfig)
-            train_aurocs = [r["train_auroc"] for r in fold_results]
-            test_aurocs = [r["test_auroc"] for r in fold_results]
+                fold_results = run_evaluation(splits, X, y, ProbeWithConfig)
+                train_aurocs = [r["train_auroc"] for r in fold_results]
+                test_aurocs = [r["test_auroc"] for r in fold_results]
+                test_accs = [r["test_accuracy"] for r in fold_results]
 
-            mean_train = _mean(train_aurocs)
-            mean_test = _mean(test_aurocs)
-            result = {
-                "layer_set": list(layer_set),
-                "pca_dim": pca_dim,
-                "feature_dim": int(X.shape[1]),
-                "n_folds": len(fold_results),
-                "mean_train_auroc": mean_train,
-                "mean_test_auroc": mean_test,
-                "std_test_auroc": _std(test_aurocs),
-                "train_test_auroc_gap": mean_train - mean_test,
-                "fold_test_aurocs": test_aurocs,
-            }
-            results.append(result)
+                mean_train = _mean(train_aurocs)
+                mean_test = _mean(test_aurocs)
+                result = {
+                    "layer_set": list(layer_set),
+                    "pca_dim": pca_dim,
+                    "logreg_c": logreg_c,
+                    "feature_dim": int(X.shape[1]),
+                    "n_folds": len(fold_results),
+                    "mean_test_accuracy": _mean(test_accs),
+                    "std_test_accuracy": _std(test_accs),
+                    "mean_train_auroc": mean_train,
+                    "mean_test_auroc": mean_test,
+                    "std_test_auroc": _std(test_aurocs),
+                    "train_test_auroc_gap": mean_train - mean_test,
+                    "fold_test_accuracies": test_accs,
+                    "fold_test_aurocs": test_aurocs,
+                }
+                results.append(result)
 
-    ranked = sorted(results, key=lambda r: r["mean_test_auroc"], reverse=True)
+    ranked = sorted(
+        results,
+        key=lambda r: (
+            -r["mean_test_accuracy"],
+            r["std_test_accuracy"],
+            -r["mean_test_auroc"],
+        ),
+    )
 
     print("\n" + "=" * 110)
-    print("Ranked experiments (higher mean_test_auroc is better)")
+    print("Ranked experiments (higher mean_test_accuracy is better)")
     print("=" * 110)
     print(
-        f"{'#':>2}  {'layers':<16} {'pca':>5} {'feat_dim':>8} "
-        f"{'mean_test':>10} {'std_test':>9} {'mean_train':>10} {'gap':>8}"
+        f"{'#':>2}  {'layers':<16} {'pca':>5} {'C':>6} {'feat_dim':>8} "
+        f"{'mean_acc':>9} {'std_acc':>8} {'mean_auc':>9} {'std_auc':>8} {'gap':>8}"
     )
     print("-" * 110)
     for i, r in enumerate(ranked, start=1):
         layers = ",".join(str(x) for x in r["layer_set"])
         print(
-            f"{i:>2}  {layers:<16} {r['pca_dim']:>5} {r['feature_dim']:>8} "
-            f"{r['mean_test_auroc'] * 100:>9.2f}% {r['std_test_auroc'] * 100:>8.2f}% "
-            f"{r['mean_train_auroc'] * 100:>9.2f}% {r['train_test_auroc_gap'] * 100:>7.2f}%"
+            f"{i:>2}  {layers:<16} {r['pca_dim']:>5} {r['logreg_c']:>6.2g} {r['feature_dim']:>8} "
+            f"{r['mean_test_accuracy'] * 100:>8.2f}% {r['std_test_accuracy'] * 100:>7.2f}% "
+            f"{r['mean_test_auroc'] * 100:>8.2f}% {r['std_test_auroc'] * 100:>7.2f}% "
+            f"{r['train_test_auroc_gap'] * 100:>7.2f}%"
         )
     print("-" * 110)
     print(f"Total runtime: {time.time() - started:.1f} s")
@@ -229,6 +244,7 @@ def main() -> None:
                 "config": {
                     "layer_sets": layer_sets,
                     "pca_dims": pca_dims,
+                    "logreg_cs": logreg_cs,
                     "n_folds": len(splits),
                 },
                 "results": ranked,
