@@ -75,6 +75,11 @@ class HallucinationProbe(nn.Module):
         Returns:
             ``self`` (for method chaining).
         """
+        np.random.seed(42)
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(42)
+
         X_scaled = self._scaler.fit_transform(X)
         n_components = min(
             self._pca_components,

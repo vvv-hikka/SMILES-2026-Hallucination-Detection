@@ -64,6 +64,11 @@ assert OUTPUT_FILE == "results.json"
 assert PREDICTIONS_FILE == "predictions.csv"
 # ---------------------------------------------------------------------
 ASSISTANT_TAG = "<|im_start|>assistant\n"
+TOKENIZER_BOUNDARY_KWARGS = {
+    "add_special_tokens": True,
+    "truncation": True,
+    "max_length": MAX_LENGTH,
+}
 
 
 def _response_start_indices(
@@ -76,22 +81,13 @@ def _response_start_indices(
 
     Index refers to token position in tokenized ``prompt + response`` and is
     clamped to ``[0, max_length - 1]``.
+    Uses the same tokenization settings as feature extraction for consistency.
     """
     starts: list[int] = []
     for prompt, response in zip(prompts, responses):
         full_text = f"{prompt}{response}"
-        prompt_tokens = tokenizer(
-            prompt,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
-        )["input_ids"]
-        full_tokens = tokenizer(
-            full_text,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
-        )["input_ids"]
+        prompt_tokens = tokenizer(prompt, **TOKENIZER_BOUNDARY_KWARGS)["input_ids"]
+        full_tokens = tokenizer(full_text, **TOKENIZER_BOUNDARY_KWARGS)["input_ids"]
 
         start_idx = min(len(prompt_tokens), max(len(full_tokens) - 1, 0))
         starts.append(start_idx)
