@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit
 
 
 def split_data(
@@ -52,20 +52,28 @@ def split_data(
     """
 
     idx = np.arange(len(y))
-    idx_train_val, idx_test = train_test_split(
-        idx,
-        test_size=test_size,
+    n_splits = 3
+    n_repeats = 2
+    rskf = RepeatedStratifiedKFold(
+        n_splits=n_splits,
+        n_repeats=n_repeats,
         random_state=random_state,
-        stratify=y,
     )
 
     relative_val = val_size / max(1.0 - test_size, 1e-6)
-    idx_train, idx_val = train_test_split(
-        idx_train_val,
-        test_size=relative_val,
-        random_state=random_state,
-        stratify=y[idx_train_val],
-    )
+    splits: list[tuple[np.ndarray, np.ndarray | None, np.ndarray]] = []
 
-    return [(idx_train, idx_val, idx_test)]
+    for rep_idx, (idx_train_val, idx_test) in enumerate(rskf.split(idx, y)):
+        y_train_val = y[idx_train_val]
+        sss = StratifiedShuffleSplit(
+            n_splits=1,
+            test_size=relative_val,
+            random_state=random_state + rep_idx,
+        )
+        tr_rel, va_rel = next(sss.split(idx_train_val, y_train_val))
+        idx_train = idx_train_val[tr_rel]
+        idx_val = idx_train_val[va_rel]
+        splits.append((idx_train, idx_val, idx_test))
+
+    return splits
 

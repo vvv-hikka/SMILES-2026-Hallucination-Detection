@@ -26,7 +26,6 @@ LAYER_SET = [0, 8, 18, 7]
 def aggregate(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
-    layer_indices: list[int] | None = None,
 ) -> torch.Tensor:
     """Convert per-token hidden states into a single feature vector.
 
@@ -49,15 +48,33 @@ def aggregate(
     layer_indices = LAYER_SET
 
     real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
+    hidden_dim = hidden_states.shape[-1]
     if real_positions.numel() == 0:
-        return torch.zeros(len(layer_indices) * hidden_states.shape[-1], dtype=hidden_states.dtype, device=hidden_states.device)
+        # For each layer: response_mean, prompt_mean, delta
+        return torch.zeros(
+            len(layer_indices) * hidden_dim * 3,
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
 
-    token_positions = real_positions
+    if response_start_idx is None:
+        response_start_idx = int(real_positions[0].item())
+
+    response_positions = real_positions[real_positions >= int(response_start_idx)]
+    if response_positions.numel() == 0:
+        response_positions = real_positions
+
+    prompt_positions = real_positions[real_positions < int(response_start_idx)]
+    if prompt_positions.numel() == 0:
+        prompt_positions = real_positions
 
     pooled_layers = []
     for layer_idx in layer_indices:
         layer = hidden_states[layer_idx]
-        pooled_layers.append(layer[token_positions].mean(dim=0))
+        response_mean = layer[response_positions].mean(dim=0)
+        prompt_mean = layer[prompt_positions].mean(dim=0)
+        delta = response_mean - prompt_mean
+        pooled_layers.append(torch.cat([response_mean, prompt_mean, delta], dim=0))
 
     return torch.cat(pooled_layers, dim=0)
 
@@ -139,7 +156,7 @@ def aggregation_and_feature_extraction(
     agg_features = aggregate(
         hidden_states,
         attention_mask,
-        layer_indices=layer_indices,
+        layer_indices=LAYER_SET,
         response_start_idx=response_start_idx,
     )
 

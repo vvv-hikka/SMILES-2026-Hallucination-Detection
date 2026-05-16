@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.decomposition import PCA
 from sklearn.metrics import f1_score
 from sklearn.preprocessing import StandardScaler
 
@@ -29,6 +30,7 @@ class HallucinationProbe(nn.Module):
         super().__init__()
         self._net: nn.Sequential | None = None  # built lazily in fit()
         self._scaler = StandardScaler()
+        self._pca: PCA | None = None
         self._threshold: float = 0.5  # tuned by fit_hyperparameters()
 
     def _build_network(self, input_dim: int) -> None:
@@ -73,10 +75,13 @@ class HallucinationProbe(nn.Module):
             ``self`` (for method chaining).
         """
         X_scaled = self._scaler.fit_transform(X)
+        n_components = min(256, X_scaled.shape[1], max(16, X_scaled.shape[0] - 1))
+        self._pca = PCA(n_components=n_components, svd_solver="auto", random_state=42)
+        X_proj = self._pca.fit_transform(X_scaled)
 
-        self._build_network(X_scaled.shape[1])
+        self._build_network(X_proj.shape[1])
 
-        X_t = torch.from_numpy(X_scaled).float()
+        X_t = torch.from_numpy(X_proj).float()
         y_t = torch.from_numpy(y.astype(np.float32))
 
         # Weight positive examples by neg/pos ratio to handle class imbalance.
@@ -85,10 +90,10 @@ class HallucinationProbe(nn.Module):
         pos_weight = torch.tensor([n_neg / max(n_pos, 1)], dtype=torch.float32)
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-        optimizer = torch.optim.AdamW(self.parameters(), lr=2e-3, weight_decay=1e-4)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3, weight_decay=5e-3)
 
         self.train()
-        for _ in range(60):
+        for _ in range(40):
             optimizer.zero_grad()
             logits = self(X_t)
             loss = criterion(logits, y_t)
@@ -159,7 +164,8 @@ class HallucinationProbe(nn.Module):
             Used to compute AUROC.
         """
         X_scaled = self._scaler.transform(X)
-        X_t = torch.from_numpy(X_scaled).float()
+        X_proj = self._pca.transform(X_scaled)
+        X_t = torch.from_numpy(X_proj).float()
         with torch.no_grad():
             logits = self(X_t)
             prob_pos = torch.sigmoid(logits).numpy()

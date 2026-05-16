@@ -63,6 +63,41 @@ PREDICTIONS_FILE = "predictions.csv"   # output file with predicted labels
 assert OUTPUT_FILE == "results.json"
 assert PREDICTIONS_FILE == "predictions.csv"
 # ---------------------------------------------------------------------
+ASSISTANT_TAG = "<|im_start|>assistant\n"
+
+
+def _response_start_indices(
+    prompts: list[str],
+    responses: list[str],
+    tokenizer,
+    max_length: int,
+) -> list[int]:
+    """Compute response start token index per sample after truncation.
+
+    Index refers to token position in tokenized ``prompt + response`` and is
+    clamped to ``[0, max_length - 1]``.
+    """
+    starts: list[int] = []
+    for prompt, response in zip(prompts, responses):
+        full_text = f"{prompt}{response}"
+        prompt_tokens = tokenizer(
+            prompt,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max_length,
+        )["input_ids"]
+        full_tokens = tokenizer(
+            full_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max_length,
+        )["input_ids"]
+
+        start_idx = min(len(prompt_tokens), max(len(full_tokens) - 1, 0))
+        starts.append(start_idx)
+    return starts
+
+
 if __name__=='__main__':
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -80,7 +115,9 @@ if __name__=='__main__':
     df = pd.read_csv(DATA_FILE)
 
     # Build the text fed to the LLM: concatenation of prompt and response.
-    all_texts  = [f"{row['prompt']}{row['response']}" for _, row in df.iterrows()]
+    all_prompts = [str(row["prompt"]) for _, row in df.iterrows()]
+    all_responses = [str(row["response"]) for _, row in df.iterrows()]
+    all_texts = [f"{p}{r}" for p, r in zip(all_prompts, all_responses)]
     all_labels = np.array([int(float(h)) for h in df["label"]])
 
     n_total = len(all_labels)
@@ -110,6 +147,12 @@ if __name__=='__main__':
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model.to(device)
+    response_starts = _response_start_indices(
+        all_prompts,
+        all_responses,
+        tokenizer=tokenizer,
+        max_length=MAX_LENGTH,
+    )
 
     all_features: list = []
     t0 = time.time()
@@ -144,10 +187,12 @@ if __name__=='__main__':
         # ── 4. Aggregate each sample and store the compact feature vector ─────
         # The raw `hidden` tensor is released at the end of this loop iteration.
         for i in range(hidden.size(0)):
+            global_idx = start + i
             feat = aggregation_and_feature_extraction(
                 hidden[i],   # (n_layers, seq_len, hidden_dim)
                 mask[i],     # (seq_len,)
                 use_geometric=USE_GEOMETRIC,
+                response_start_idx=response_starts[global_idx],
             )
             all_features.append(feat.cpu())
 
@@ -177,9 +222,17 @@ if __name__=='__main__':
 
     # ── Load test data ────────────────────────────────────────────────────────
     df_test    = pd.read_csv(TEST_FILE)
-    test_texts = [f"{row['prompt']}{row['response']}" for _, row in df_test.iterrows()]
+    test_prompts = [str(row["prompt"]) for _, row in df_test.iterrows()]
+    test_responses = [str(row["response"]) for _, row in df_test.iterrows()]
+    test_texts = [f"{p}{r}" for p, r in zip(test_prompts, test_responses)]
     test_ids   = df_test.index
     print(f"Test set loaded: {len(test_texts)} samples")
+    test_response_starts = _response_start_indices(
+        test_prompts,
+        test_responses,
+        tokenizer=tokenizer,
+        max_length=MAX_LENGTH,
+    )
 
     # ── Extract features for test set (same loop as Section 4) ───────────────
     test_features: list = []
@@ -205,8 +258,12 @@ if __name__=='__main__':
         mask   = attention_mask.cpu()
 
         for i in range(hidden.size(0)):
+            global_idx = start + i
             feat = aggregation_and_feature_extraction(
-                hidden[i], mask[i], use_geometric=USE_GEOMETRIC,
+                hidden[i],
+                mask[i],
+                use_geometric=USE_GEOMETRIC,
+                response_start_idx=test_response_starts[global_idx],
             )
             test_features.append(feat.cpu())
 
