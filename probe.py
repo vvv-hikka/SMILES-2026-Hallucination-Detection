@@ -22,7 +22,7 @@ class HallucinationProbe:
 
     """
 
-    def __init__(self, pca_components: int = 96, logreg_c: float = 0.03) -> None:
+    def __init__(self, pca_components: int = 64, logreg_c: float = 0.03) -> None:
         self._scaler = StandardScaler()
         self._pca: PCA | None = None
         self._clf: LogisticRegression | None = None
