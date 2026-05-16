@@ -19,15 +19,13 @@ from __future__ import annotations
 
 import torch
 
-LAYER_SET_NO_GEOMETRIC = [0, 8, 18, 7, 11, 10, 19, 20]
-LAYER_SET_WITH_GEOMETRIC = [6, 12]
+LAYER_SET = [0, 8, 18, 7]
+# LAYER_SET_WITH_GEOMETRIC = [6, 12]
 
 
 def aggregate(
     hidden_states: torch.Tensor,
     attention_mask: torch.Tensor,
-    layer_indices: list[int] | None = None,
-    response_start_idx: int | None = None,
 ) -> torch.Tensor:
     """Convert per-token hidden states into a single feature vector.
 
@@ -47,18 +45,13 @@ def aggregate(
         token pooling (mean, max, weighted), or multi-layer fusion strategies.
     """
 
-    if layer_indices is None:
-        layer_indices = LAYER_SET_NO_GEOMETRIC
+    layer_indices = LAYER_SET
 
     real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
     if real_positions.numel() == 0:
         return torch.zeros(len(layer_indices) * hidden_states.shape[-1], dtype=hidden_states.dtype, device=hidden_states.device)
 
-    if response_start_idx is not None:
-        response_positions = real_positions[real_positions >= int(response_start_idx)]
-        token_positions = response_positions if response_positions.numel() > 0 else real_positions
-    else:
-        token_positions = real_positions
+    token_positions = real_positions
 
     pooled_layers = []
     for layer_idx in layer_indices:
@@ -91,30 +84,30 @@ def extract_geometric_features(
         norms, inter-layer cosine similarity (representation drift), or
         sequence length.
     """
-    layer_indices = LAYER_SET_WITH_GEOMETRIC
+    # layer_indices = LAYER_SET_WITH_GEOMETRIC
 
-    real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
-    if real_positions.numel() == 0:
-        return torch.zeros(4, dtype=hidden_states.dtype, device=hidden_states.device)
+    # real_positions = attention_mask.nonzero(as_tuple=False).squeeze(-1)
+    # if real_positions.numel() == 0:
+    #     return torch.zeros(4, dtype=hidden_states.dtype, device=hidden_states.device)
 
-    layer_means = []
-    for layer_idx in layer_indices:
-        layer = hidden_states[layer_idx]  # (seq_len, hidden_dim)
-        layer_means.append(layer[real_positions].mean(dim=0))
+    # layer_means = []
+    # for layer_idx in layer_indices:
+    #     layer = hidden_states[layer_idx]  # (seq_len, hidden_dim)
+    #     layer_means.append(layer[real_positions].mean(dim=0))
 
-    stacked = torch.stack(layer_means, dim=0)  # (n_layers, hidden_dim)
-    norms = torch.norm(stacked, dim=1)  # (n_layers,)
-    drift = torch.norm(stacked[1:] - stacked[:-1], dim=1) if stacked.size(0) > 1 else torch.zeros(1, dtype=hidden_states.dtype, device=hidden_states.device)
-    n_tokens = torch.tensor(float(real_positions.numel()), dtype=hidden_states.dtype, device=hidden_states.device)
+    # stacked = torch.stack(layer_means, dim=0)  # (n_layers, hidden_dim)
+    # norms = torch.norm(stacked, dim=1)  # (n_layers,)
+    # drift = torch.norm(stacked[1:] - stacked[:-1], dim=1) if stacked.size(0) > 1 else torch.zeros(1, dtype=hidden_states.dtype, device=hidden_states.device)
+    # n_tokens = torch.tensor(float(real_positions.numel()), dtype=hidden_states.dtype, device=hidden_states.device)
 
-    return torch.stack(
-        [
-            norms.mean(),
-            norms.std(unbiased=False),
-            drift.mean(),
-            torch.log1p(n_tokens),
-        ]
-    )
+    # return torch.stack(
+    #     [
+    #         norms.mean(),
+    #         norms.std(unbiased=False),
+    #         drift.mean(),
+    #         torch.log1p(n_tokens),
+    #     ]
+    # )
 
 
 def aggregation_and_feature_extraction(
@@ -142,7 +135,7 @@ def aggregation_and_feature_extraction(
         ``feature_dim = hidden_dim`` (or larger for multi-layer or geometric
         concatenations).
     """
-    layer_indices = LAYER_SET_WITH_GEOMETRIC if use_geometric else LAYER_SET_NO_GEOMETRIC
+    layer_indices = LAYER_SET
     agg_features = aggregate(
         hidden_states,
         attention_mask,
