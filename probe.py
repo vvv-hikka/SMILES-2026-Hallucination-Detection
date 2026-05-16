@@ -20,11 +20,9 @@ from sklearn.preprocessing import StandardScaler
 class HallucinationProbe:
     """Binary classifier that detects hallucinations from hidden-state features.
 
-    Uses ``StandardScaler`` + PCA + ``LogisticRegression`` for a stable
-    low-capacity probe on small datasets.
     """
 
-    def __init__(self, pca_components: int = 192) -> None:
+    def __init__(self, pca_components: int = 96) -> None:
         self._scaler = StandardScaler()
         self._pca: PCA | None = None
         self._clf: LogisticRegression | None = None
@@ -57,7 +55,7 @@ class HallucinationProbe:
         X_proj = self._pca.fit_transform(X_scaled)
 
         self._clf = LogisticRegression(
-            C=0.5,
+            C=0.03,
             penalty="l2",
             solver="liblinear",
             max_iter=2000,
@@ -86,8 +84,7 @@ class HallucinationProbe:
         """
         probs = self.predict_proba(X_val)[:, 1]
 
-        # Coarse, stable threshold search to reduce tiny-val overfitting.
-        candidates = np.linspace(0.30, 0.90, 31)
+        candidates = np.linspace(0.45, 0.95, 26)
 
         best_threshold = 0.5
         best_acc = -1.0
